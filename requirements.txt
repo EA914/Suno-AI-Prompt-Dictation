@@ -1,0 +1,10 @@
+aiohttp
+python-dotenv
+fastapi
+uvicorn
+pydantic
+requests
+pyaudio
+tempfile
+keyboard
+wave
