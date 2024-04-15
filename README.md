@@ -20,7 +20,7 @@ Thank you to [Suno API](https://github.com/SunoAI-API/Suno-API) for the unnofici
 
      ![cookie](https://github.com/EA914/Suno-AI-Prompt-Dictation/assets/14112758/3a3b3ef7-240a-4367-9af8-4b053ec80889)
 
-   *Open AI:
+   * Open AI:
    
      a. Navigate to https://platform.openai.com/account/api-keys and grab your API key
 4. Paste these values into your .env file
