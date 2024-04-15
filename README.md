@@ -25,8 +25,10 @@ Thank you to [Suno API](https://github.com/SunoAI-API/Suno-API) for the unnofici
      a. Navigate to https://platform.openai.com/account/api-keys and grab your API key
 4. Paste these values into your .env file
 5. Install dependencies
+
    Run `pip3 install -r requirements.txt`
 6. Open command prompt / terminal and navigate to the repository directory and enter:
+
    `uvicorn main:app`
 
 7. Open another command line window and run the program
