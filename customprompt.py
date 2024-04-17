@@ -1,9 +1,12 @@
+#Ensure your path in line 91 points to your ffplay.exe file.
+
 import os
 import requests
 import argparse
 from dotenv import load_dotenv
 import time
 import json
+import subprocess
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, APIC, TIT2, USLT
 from pathlib import Path
@@ -22,9 +25,7 @@ def fetch_song_details(clip_id):
 	response = requests.get(url, headers=headers)
 	if response.status_code == 200:
 		response_json = response.json()
-		if isinstance(response_json, list):
-			return response_json[0]	 # Assuming the first item in the list is the relevant one
-		return response_json
+		return response_json[0] if isinstance(response_json, list) else response_json
 	else:
 		print(f"Failed to fetch song details: {response.status_code} {response.text}")
 		return {}
@@ -58,18 +59,16 @@ def initiate_custom_song_generation(lyrics, genre, title):
 def download_song(audio_url, filename, image_url, lyrics):
 	response = requests.get(audio_url)
 	if response.status_code == 200:
-		Path("songs").mkdir(parents=True, exist_ok=True)
-		file_path = os.path.join("songs", filename + '.mp3')
+		file_path = os.path.join("songs", filename)
 		with open(file_path, 'wb') as f:
 			f.write(response.content)
 		print(f"Song downloaded successfully: {file_path}")
-		if image_url:
-			add_album_art(file_path, image_url)
-		if lyrics:
-			set_id3_tags(file_path, filename, lyrics)
+		add_album_art(file_path, image_url)
+		set_id3_tags(file_path, filename.replace('-', ' ')[:-4], lyrics)
+		return file_path
 	else:
 		print("Failed to download the song:", response.status_code, response.text)
-
+		return None
 
 def add_album_art(mp3_file_path, image_url):
 	audio = MP3(mp3_file_path, ID3=ID3)
@@ -83,6 +82,15 @@ def set_id3_tags(mp3_file_path, title, lyrics):
 	audio.tags.add(USLT(encoding=3, lang=u'eng', desc=u'lyrics', text=lyrics))
 	audio.save()
 	print(f"ID3 tags set for {mp3_file_path}")
+
+def play_song_with_ffplay(file_path, title, description_prompt, lyrics):
+	print(f"Playing song: {file_path}")
+	print(f"Title: {title}")
+	print(f"Description Prompt: {description_prompt}")
+	print(f"Lyrics: {lyrics}")
+	ffplay_path = r"C:\Program Files (x86)\ffmpeg\bin\ffplay.exe"
+	command = [ffplay_path, "-autoexit", "-nodisp", file_path]
+	subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def main():
 	parser = argparse.ArgumentParser()
@@ -99,46 +107,34 @@ def main():
 			genre = input("Enter the genre of the song: ")
 			title = input("Enter the title of the song: ")
 			clip_ids = initiate_custom_song_generation(lyrics, genre, title)
-			if clip_ids:
-				print("Waiting for the song to be processed...")
-				time.sleep(120)	 # Waiting for processing
-				for i, clip_id in enumerate(clip_ids, start=1):
-					song_details = fetch_song_details(clip_id)
-					if song_details:
-						title = song_details.get('title', f"{clip_id}")
-						image_url = song_details.get('image_large_url', '')
-						save_filename = f"{title.replace(' ', '-')}"
-						if i > 1:
-							save_filename += f"-{i}"
-						audio_url = get_audio_url_from_clip_id(clip_id)
-						download_song(audio_url, save_filename, image_url, lyrics)	# Use lyrics from the file
-			else:
-				print("Failed to generate song or retrieve clip IDs.")
 		except FileNotFoundError:
 			print("lyrics.txt file not found.")
 			return
 	else:
 		description = input("Enter a description for the song you want to generate: ")
 		clip_ids = initiate_song_generation(description)
-		if clip_ids:
-			print("Waiting for the song to be processed...")
-			time.sleep(120)	 # Waiting for processing
-			for i, clip_id in enumerate(clip_ids, start=1):
-				song_details = fetch_song_details(clip_id)
-				if song_details:
-					title = song_details.get('title', f"{clip_id}")
-					lyrics = song_details.get('prompt', '')
-					image_url = song_details.get('image_large_url', '')
-					save_filename = f"{title.replace(' ', '-')}"
-					if i > 1:
-						save_filename += f"-{i}"
-					audio_url = get_audio_url_from_clip_id(clip_id)
-					download_song(audio_url, save_filename, image_url, lyrics)
-				else:
-					print(f"Failed to retrieve details for clip ID {clip_id}.")
-		else:
-			print("Failed to generate song or retrieve clip IDs.")
+
+	downloaded_files = []
+	if clip_ids:
+		print("Waiting for the song to be processed...")
+		time.sleep(120)	 # Delay before downloading
+		for i, clip_id in enumerate(clip_ids, start=1):
+			song_details = fetch_song_details(clip_id)
+			if song_details:
+				title = song_details['title']
+				description_prompt = song_details.get('metadata', {}).get('gpt_description_prompt', '')
+				lyrics = song_details.get('metadata', {}).get('prompt', '') if not args.file else lyrics
+				filename = f"{title.replace(' ', '-')}-{i}.mp3"
+				file_path = os.path.join(songs_dir, filename)
+				audio_url = get_audio_url_from_clip_id(clip_id)
+				if file_path := download_song(audio_url, filename, song_details.get('image_large_url', ''), lyrics):
+					downloaded_files.append((file_path, title, description_prompt, lyrics))
+				time.sleep(3)  # Delay between downloads to prevent rate limiting
+	else:
+		print("Failed to generate song or retrieve clip IDs.")
+
+	if downloaded_files:
+		play_song_with_ffplay(*downloaded_files[0])	 # Play only the first downloaded song and show details
 
 if __name__ == "__main__":
 	main()
-
