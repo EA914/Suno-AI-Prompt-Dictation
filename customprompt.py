@@ -1,10 +1,12 @@
 #Ensure your path in line 91 points to your ffplay.exe file.
+#Run uvicorn main:app first
 
 import os
 import requests
 import argparse
 from dotenv import load_dotenv
 import time
+import keyboard
 import json
 import subprocess
 from mutagen.mp3 import MP3
@@ -22,13 +24,20 @@ def get_audio_url_from_clip_id(clip_id):
 def fetch_song_details(clip_id):
 	url = f"http://127.0.0.1:8000/feed/{clip_id}"
 	headers = {'Cookie': f'session_id={os.getenv("SESSION_ID")}; {os.getenv("COOKIE")}'}
-	response = requests.get(url, headers=headers)
-	if response.status_code == 200:
-		response_json = response.json()
-		return response_json[0] if isinstance(response_json, list) else response_json
-	else:
-		print(f"Failed to fetch song details: {response.status_code} {response.text}")
-		return {}
+	while True:
+		response = requests.get(url, headers=headers)
+		if response.status_code == 200:
+			response_json = response.json()
+			song_details = response_json[0] if isinstance(response_json, list) else response_json
+			if song_details.get('status') == 'complete':  # Check if status is 'complete'
+				print("All song details are complete.")
+				return song_details
+			else:
+				print("Song details not complete yet, polling again in 5 seconds.")
+				time.sleep(5)
+		else:
+			print(f"Failed to fetch song details: {response.status_code} {response.text}")
+			return {}
 
 def initiate_song_generation(description):
 	url = "http://127.0.0.1:8000/generate/description-mode"
@@ -64,7 +73,7 @@ def download_song(audio_url, filename, image_url, lyrics):
 			f.write(response.content)
 		print(f"Song downloaded successfully: {file_path}")
 		add_album_art(file_path, image_url)
-		set_id3_tags(file_path, filename.replace('-', ' ')[:-4], lyrics)
+		set_id3_tags(file_path, filename, lyrics)  # Directly use the modified title for ID3 tags
 		return file_path
 	else:
 		print("Failed to download the song:", response.status_code, response.text)
@@ -78,19 +87,42 @@ def add_album_art(mp3_file_path, image_url):
 
 def set_id3_tags(mp3_file_path, title, lyrics):
 	audio = MP3(mp3_file_path, ID3=ID3)
-	audio.tags.add(TIT2(encoding=3, text=title))
+	clean_title = title.replace('-', ' ').replace('.mp3', '')  # Remove dashes and extension from title
+	audio.tags.add(TIT2(encoding=3, text=clean_title))
 	audio.tags.add(USLT(encoding=3, lang=u'eng', desc=u'lyrics', text=lyrics))
 	audio.save()
 	print(f"ID3 tags set for {mp3_file_path}")
 
-def play_song_with_ffplay(file_path, title, description_prompt, lyrics):
-	print(f"Playing song: {file_path}")
-	print(f"Title: {title}")
-	print(f"Description Prompt: {description_prompt}")
-	print(f"Lyrics: {lyrics}")
+def play_song_with_ffplay(file_paths, titles, description_prompts, lyrics, generated_with_file):
 	ffplay_path = r"C:\Program Files (x86)\ffmpeg\bin\ffplay.exe"
-	command = [ffplay_path, "-autoexit", "-nodisp", file_path]
-	subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+	current_song_index = 0
+	processes = []
+
+	# Start playing the first song by default
+	processes.append(subprocess.Popen([ffplay_path, "-autoexit", "-nodisp", "-loglevel", "quiet", file_paths[0]]))
+	print_song_details(titles[0], description_prompts[0], lyrics[0], generated_with_file)
+
+	while True:
+		if keyboard.is_pressed('right') and current_song_index < len(file_paths) - 1:
+			processes[current_song_index].kill()
+			current_song_index += 1
+			processes.append(subprocess.Popen([ffplay_path, "-autoexit", "-nodisp", "-loglevel", "quiet", file_paths[current_song_index]]))
+			print_song_details(titles[current_song_index], description_prompts[current_song_index], lyrics[current_song_index], generated_with_file)
+
+		elif keyboard.is_pressed('left') and current_song_index > 0:
+			processes[current_song_index].kill()
+			current_song_index -= 1
+			processes.append(subprocess.Popen([ffplay_path, "-autoexit", "-nodisp", "-loglevel", "quiet", file_paths[current_song_index]]))
+			print_song_details(titles[current_song_index], description_prompts[current_song_index], lyrics[current_song_index], generated_with_file)
+
+		time.sleep(0.1)	 # Avoid high CPU usage
+		
+def print_song_details(title, description_prompt, lyrics, generated_with_file):
+	print(f"Playing song: {title}")
+	print(f"Title: {title}")
+	if not generated_with_file:
+		print(f"Description Prompt: {description_prompt}")
+	print(f"Lyrics: {lyrics}")
 
 def main():
 	parser = argparse.ArgumentParser()
@@ -116,25 +148,25 @@ def main():
 
 	downloaded_files = []
 	if clip_ids:
-		print("Waiting for the song to be processed...")
-		time.sleep(120)	 # Delay before downloading
 		for i, clip_id in enumerate(clip_ids, start=1):
 			song_details = fetch_song_details(clip_id)
 			if song_details:
-				title = song_details['title']
-				description_prompt = song_details.get('metadata', {}).get('gpt_description_prompt', '')
-				lyrics = song_details.get('metadata', {}).get('prompt', '') if not args.file else lyrics
-				filename = f"{title.replace(' ', '-')}-{i}.mp3"
+				filename = f"{song_details['title'].replace(' ', '-')}-{i}.mp3"
 				file_path = os.path.join(songs_dir, filename)
 				audio_url = get_audio_url_from_clip_id(clip_id)
-				if file_path := download_song(audio_url, filename, song_details.get('image_large_url', ''), lyrics):
-					downloaded_files.append((file_path, title, description_prompt, lyrics))
-				time.sleep(3)  # Delay between downloads to prevent rate limiting
+				if file_path := download_song(audio_url, filename, song_details.get('image_large_url', ''), song_details.get('metadata').get('prompt', '')):
+					downloaded_files.append((file_path, song_details['title'], song_details.get('metadata').get('gpt_description_prompt', ''), song_details.get('metadata').get('prompt', '')))
 	else:
 		print("Failed to generate song or retrieve clip IDs.")
 
 	if downloaded_files:
-		play_song_with_ffplay(*downloaded_files[0])	 # Play only the first downloaded song and show details
+		play_song_with_ffplay(
+			[df[0] for df in downloaded_files],
+			[df[1] for df in downloaded_files],
+			[df[2] for df in downloaded_files],
+			[df[3] for df in downloaded_files],
+			args.file
+		)
 
 if __name__ == "__main__":
 	main()
