@@ -1,6 +1,5 @@
 #Ensure your path in line 91 points to your ffplay.exe file.
 #Run uvicorn main:app first
-
 import os
 import requests
 import argparse
@@ -96,24 +95,25 @@ def set_id3_tags(mp3_file_path, title, lyrics):
 def play_song_with_ffplay(file_paths, titles, description_prompts, lyrics, generated_with_file):
 	ffplay_path = r"C:\Program Files (x86)\ffmpeg\bin\ffplay.exe"
 	current_song_index = 0
-	processes = []
+	current_process = None	# Initialize current process variable to keep track of the playing song
 
-	# Start playing the first song by default
-	processes.append(subprocess.Popen([ffplay_path, "-autoexit", "-nodisp", "-loglevel", "quiet", file_paths[0]]))
-	print_song_details(titles[0], description_prompts[0], lyrics[0], generated_with_file)
+	def start_song(index):
+		nonlocal current_process
+		if current_process:
+			current_process.kill()	# Stop the currently playing song
+		current_process = subprocess.Popen([ffplay_path, "-autoexit", "-nodisp", "-loglevel", "quiet", file_paths[index]])
+		print_song_details(titles[index], description_prompts[index], lyrics[index], generated_with_file)
+
+	start_song(current_song_index)	# Start the first song initially
 
 	while True:
 		if keyboard.is_pressed('right') and current_song_index < len(file_paths) - 1:
-			processes[current_song_index].kill()
 			current_song_index += 1
-			processes.append(subprocess.Popen([ffplay_path, "-autoexit", "-nodisp", "-loglevel", "quiet", file_paths[current_song_index]]))
-			print_song_details(titles[current_song_index], description_prompts[current_song_index], lyrics[current_song_index], generated_with_file)
+			start_song(current_song_index)
 
 		elif keyboard.is_pressed('left') and current_song_index > 0:
-			processes[current_song_index].kill()
 			current_song_index -= 1
-			processes.append(subprocess.Popen([ffplay_path, "-autoexit", "-nodisp", "-loglevel", "quiet", file_paths[current_song_index]]))
-			print_song_details(titles[current_song_index], description_prompts[current_song_index], lyrics[current_song_index], generated_with_file)
+			start_song(current_song_index)
 
 		time.sleep(0.1)	 # Avoid high CPU usage
 		
